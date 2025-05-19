@@ -2,19 +2,25 @@ import os
 import argparse
 import numpy as np
 import tensorflow as tf
-
-from scipy.misc import imread, imsave, imresize
+import imageio.v2 as iio
+from skimage.transform import resize as skimage_resize
 from matplotlib import pyplot as plt
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+# os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+
+# Ensure TF1 compatibility mode when using TF2
+tf.compat.v1.disable_eager_execution()
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-# input image path
-parser = argparse.ArgumentParser()
-
-parser.add_argument('--im_path', type=str, default='./demo/45765448.jpg',
-                    help='input image paths.')
+# --- Global TensorFlow Variables ---
+SESS = None
+GRAPH = None
+X_TENSOR = None
+ROOM_TYPE_LOGIT_TENSOR = None
+ROOM_BOUNDARY_LOGIT_TENSOR = None
+MODEL_INITIALIZED = False
+# --- End Global TensorFlow Variables ---
 
 # color map
 floorplan_map = {
@@ -32,56 +38,101 @@ floorplan_map = {
 }
 
 def ind2rgb(ind_im, color_map=floorplan_map):
-	rgb_im = np.zeros((ind_im.shape[0], ind_im.shape[1], 3))
-
-	for i, rgb in color_map.iteritems():
+	rgb_im = np.zeros((ind_im.shape[0], ind_im.shape[1], 3), dtype=np.uint8) # Ensure uint8 for Gradio
+	for i, rgb in color_map.items():
 		rgb_im[(ind_im==i)] = rgb
-
 	return rgb_im
 
-def main(args):
-	# load input
-	im = imread(args.im_path, mode='RGB')
-	im = im.astype(np.float32)
-	im = imresize(im, (512,512,3)) / 255.
+def initialize_model():
+	global SESS, GRAPH, X_TENSOR, ROOM_TYPE_LOGIT_TENSOR, ROOM_BOUNDARY_LOGIT_TENSOR, MODEL_INITIALIZED
+	if MODEL_INITIALIZED:
+		return
 
-	# create tensorflow session
-	with tf.Session() as sess:
-		
-		# initialize
-		sess.run(tf.group(tf.global_variables_initializer(),
-					tf.local_variables_initializer()))
+	print("Initializing TensorFlow model...")
+	SESS = tf.compat.v1.Session()
+	
+	# initialize
+	SESS.run(tf.group(tf.compat.v1.global_variables_initializer(),
+						tf.compat.v1.local_variables_initializer()))
 
-		# restore pretrained model
-		saver = tf.train.import_meta_graph('./pretrained/pretrained_r3d.meta')
-		saver.restore(sess, './pretrained/pretrained_r3d')
+	# restore pretrained model
+	saver = tf.compat.v1.train.import_meta_graph('./pretrained/pretrained_r3d/pretrained_r3d.meta', clear_devices=True)
+	saver.restore(SESS, './pretrained/pretrained_r3d/pretrained_r3d')
 
-		# get default graph
-		graph = tf.get_default_graph()
+	# get default graph
+	GRAPH = tf.compat.v1.get_default_graph()
 
-		# restore inputs & outpus tensor
-		x = graph.get_tensor_by_name('inputs:0')
-		room_type_logit = graph.get_tensor_by_name('Cast:0')
-		room_boundary_logit = graph.get_tensor_by_name('Cast_1:0')
+	# restore inputs & outpus tensor
+	X_TENSOR = GRAPH.get_tensor_by_name('inputs:0')
+	ROOM_TYPE_LOGIT_TENSOR = GRAPH.get_tensor_by_name('Cast:0')
+	ROOM_BOUNDARY_LOGIT_TENSOR = GRAPH.get_tensor_by_name('Cast_1:0')
+	MODEL_INITIALIZED = True
+	print("TensorFlow model initialized.")
 
-		# infer results
-		[room_type, room_boundary] = sess.run([room_type_logit, room_boundary_logit],\
-										feed_dict={x:im.reshape(1,512,512,3)})
-		room_type, room_boundary = np.squeeze(room_type), np.squeeze(room_boundary)
+def generate_floorplan(input_image_np):
+	global SESS, X_TENSOR, ROOM_TYPE_LOGIT_TENSOR, ROOM_BOUNDARY_LOGIT_TENSOR
 
-		# merge results
-		floorplan = room_type.copy()
-		floorplan[room_boundary==1] = 9
-		floorplan[room_boundary==2] = 10
-		floorplan_rgb = ind2rgb(floorplan)
+	if not MODEL_INITIALIZED:
+		initialize_model()
 
-		# plot results
-		plt.subplot(121)
-		plt.imshow(im)
-		plt.subplot(122)
-		plt.imshow(floorplan_rgb/255.)
-		plt.show()
+	# Preprocess the input image (similar to main)
+	# input_image_np is expected to be a uint8 RGB image
+	if input_image_np.shape[2] == 4: # Handle RGBA from some uploads
+		input_image_np = input_image_np[:,:,:3]
+
+	im_resized_float64 = skimage_resize(input_image_np, (512, 512), anti_aliasing=True)
+	im_processed = im_resized_float64.astype(np.float32) # Model expects float32 in [0,1]
+
+	# infer results
+	[room_type, room_boundary] = SESS.run([ROOM_TYPE_LOGIT_TENSOR, ROOM_BOUNDARY_LOGIT_TENSOR],
+									feed_dict={X_TENSOR: im_processed.reshape(1,512,512,3)})
+	room_type, room_boundary = np.squeeze(room_type), np.squeeze(room_boundary)
+
+	# merge results
+	floorplan = room_type.copy()
+	floorplan[room_boundary==1] = 9
+	floorplan[room_boundary==2] = 10
+	floorplan_rgb = ind2rgb(floorplan) # This now returns uint8
+
+	# For display, Gradio expects uint8 images.
+	# The input image also needs to be uint8 if it was float before.
+	# im_processed is float32 [0,1], convert back to uint8 [0,255]
+	im_display = (im_processed * 255).astype(np.uint8)
+
+	return im_display, floorplan_rgb
+
+
+def main_cli(args):
+	# This function is for the command-line interface
+	initialize_model() # Ensure model is loaded
+
+	# load input image file
+	im_uint8_from_file = iio.imread(args.im_path, pilmode='RGB')
+	
+	# Generate floorplan using the core logic
+	# Note: generate_floorplan expects a NumPy array.
+	# The generate_floorplan function handles its own resizing and type conversion.
+	original_display, floorplan_rgb_output = generate_floorplan(im_uint8_from_file)
+
+	# plot results for CLI
+	plt.figure(figsize=(10, 5))
+	plt.subplot(121)
+	plt.imshow(original_display) # Show the resized input image
+	plt.title("Input Image (Resized)")
+	plt.axis('off')
+
+	plt.subplot(122)
+	plt.imshow(floorplan_rgb_output) # floorplan_rgb_output is already uint8
+	plt.title("Generated Floorplan")
+	plt.axis('off')
+	
+	plt.tight_layout()
+	plt.show()
 
 if __name__ == '__main__':
+	# Argument parsing for CLI
+	parser = argparse.ArgumentParser(description="Generate a floorplan from an image.")
+	parser.add_argument('--im_path', type=str, default='./demo/45765448.jpg',
+						help='Path to the input image file.')
 	FLAGS, unparsed = parser.parse_known_args()
-	main(FLAGS)
+	main_cli(FLAGS)
