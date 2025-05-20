@@ -75,10 +75,18 @@ def generate_floorplan(input_image_np):
 	if not MODEL_INITIALIZED:
 		initialize_model()
 
+	# Store original image shape
+	original_height, original_width = input_image_np.shape[0], input_image_np.shape[1]
+
 	# Preprocess the input image (similar to main)
 	# input_image_np is expected to be a uint8 RGB image
 	if input_image_np.shape[2] == 4: # Handle RGBA from some uploads
 		input_image_np = input_image_np[:,:,:3]
+
+	# Ensure input_image_np is uint8 for consistent return type later
+	if input_image_np.dtype != np.uint8:
+		input_image_np = (input_image_np * 255).astype(np.uint8) if input_image_np.max() <= 1.0 else input_image_np.astype(np.uint8)
+
 
 	im_resized_float64 = skimage_resize(input_image_np, (512, 512), anti_aliasing=True)
 	im_processed = im_resized_float64.astype(np.float32) # Model expects float32 in [0,1]
@@ -89,17 +97,19 @@ def generate_floorplan(input_image_np):
 	room_type, room_boundary = np.squeeze(room_type), np.squeeze(room_boundary)
 
 	# merge results
-	floorplan = room_type.copy()
-	floorplan[room_boundary==1] = 9
-	floorplan[room_boundary==2] = 10
-	floorplan_rgb = ind2rgb(floorplan) # This now returns uint8
+	floorplan_512 = room_type.copy()
+	floorplan_512[room_boundary==1] = 9
+	floorplan_512[room_boundary==2] = 10
+	floorplan_rgb_512 = ind2rgb(floorplan_512) # This returns uint8, 512x512
 
-	# For display, Gradio expects uint8 images.
-	# The input image also needs to be uint8 if it was float before.
-	# im_processed is float32 [0,1], convert back to uint8 [0,255]
-	im_display = (im_processed * 255).astype(np.uint8)
+	# Resize floorplan_rgb_512 to original image dimensions
+	# skimage_resize output is float64 in [0,1] if input is uint8.
+	# We need to convert it back to uint8.
+	floorplan_rgb_resized_float = skimage_resize(floorplan_rgb_512, (original_height, original_width), anti_aliasing=True, preserve_range=True, order=0) # order=0 for nearest neighbor to preserve discrete colors
+	floorplan_rgb_final = floorplan_rgb_resized_float.astype(np.uint8)
 
-	return im_display, floorplan_rgb
+
+	return input_image_np, floorplan_rgb_final
 
 
 def main_cli(args):
@@ -112,13 +122,13 @@ def main_cli(args):
 	# Generate floorplan using the core logic
 	# Note: generate_floorplan expects a NumPy array.
 	# The generate_floorplan function handles its own resizing and type conversion.
-	original_display, floorplan_rgb_output = generate_floorplan(im_uint8_from_file)
+	original_input_image, floorplan_rgb_output = generate_floorplan(im_uint8_from_file)
 
 	# plot results for CLI
 	plt.figure(figsize=(10, 5))
 	plt.subplot(121)
-	plt.imshow(original_display) # Show the resized input image
-	plt.title("Input Image (Resized)")
+	plt.imshow(original_input_image) # Show the original input image
+	plt.title("Input Image")
 	plt.axis('off')
 
 	plt.subplot(122)

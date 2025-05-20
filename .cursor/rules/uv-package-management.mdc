@@ -1,0 +1,62 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# UV Package Management
+
+## Project Setup
+To initialize a new project:
+```bash
+uv init my-project
+cd my-project
+```
+
+## Adding Dependencies
+Add packages to your project:
+```bash
+uv add {package_name}              # Add to main dependencies
+uv add --dev {package_name}        # Add to development dependencies
+uv add --group {group} {package}   # Add to specific group
+```
+
+## Version Management
+Specify version constraints:
+```bash
+uv add "{package}>=1.0.0,<2.0.0"   # Add with version constraints
+uv add --upgrade {package}         # Upgrade to latest version
+```
+
+## Environment Management
+Lock and sync your environment:
+```bash
+uv lock                           # Create/update lockfile
+uv sync                           # Install from lockfile
+```
+
+## Running Commands
+Execute commands in the project environment:
+```bash
+uv run python {script}            # Run Python script
+uv run --no-sync {command}        # Run without syncing
+```
+
+## Python Version Control
+Manage Python versions:
+```bash
+uv python install {version}       # Install Python version
+uv python pin {version}           # Pin project version
+uv python list                    # List available versions
+```
+
+## Package Inspection
+View dependency information:
+```bash
+uv tree                          # Show dependency tree
+```
+
+## Maintenance
+Keep UV up to date:
+```bash
+uv self update                   # Update UV itself
+```

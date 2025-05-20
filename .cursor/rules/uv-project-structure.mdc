@@ -1,0 +1,41 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# UV Project Structure and Best Practices
+
+## Project Files
+A typical UV project structure:
+```
+.
+├── .python-version    # Python version specification
+├── pyproject.toml    # Project metadata and dependencies
+├── uv.lock          # Locked dependencies
+├── .venv/           # Virtual environment
+└── src/             # Source code directory
+```
+
+## Dependency Management
+Best practices for managing dependencies:
+1. Use `pyproject.toml` for all dependency declarations
+2. Keep `uv.lock` in version control for reproducible builds
+3. Use dependency groups for different purposes:
+   - `[project.dependencies]` for runtime dependencies
+   - `[project.optional-dependencies]` for optional features
+   - `[tool.uv.dev-dependencies]` for development tools
+
+## Environment Management
+Recommended workflow:
+1. Initialize project with `uv init`
+2. Add dependencies with `uv add`
+3. Lock dependencies with `uv lock`
+4. Sync environment with `uv sync`
+5. Run commands with `uv run`
+
+## Version Control
+Best practices:
+1. Pin Python version with `uv python pin`
+2. Use version constraints in `pyproject.toml`
+3. Keep `uv.lock` updated and committed
+4. Document dependency groups in README.md

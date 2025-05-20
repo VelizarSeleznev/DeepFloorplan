@@ -1,51 +1,66 @@
-import gradio as gr
-from demo import generate_floorplan, initialize_model
+import os
+import base64
+from io import BytesIO
+from flask import Flask, request, render_template
+from PIL import Image
 import numpy as np
+from demo import generate_floorplan, initialize_model
+
+app = Flask(__name__)
 
 # Initialize the TensorFlow model once when the app starts
-print("Starting Gradio app, initializing model...")
+print("Starting Flask app, initializing model...")
 initialize_model()
-print("Model initialized, Gradio app is ready.")
+print("Model initialized, Flask app is ready.")
 
-def floorplan_interface(input_image):
-    """
-    Gradio interface function.
-    Takes a NumPy array (from Gradio image input) and returns two NumPy arrays.
-    """
-    if input_image is None:
-        # Return blank images or a message if no image is provided
-        # For simplicity, let's return blank 512x512 images
-        blank_img = np.zeros((512, 512, 3), dtype=np.uint8)
-        return blank_img, blank_img, "Please upload an image."
-
-    # The input_image from gr.Image(type="numpy") is already a NumPy array (H, W, C)
-    # and should be uint8.
-    # generate_floorplan expects an RGB image.
+def numpy_to_base64(image_array):
+    """Convert a numpy array to base64 string for HTML display."""
+    # Ensure the image is in uint8 format
+    if image_array.dtype != np.uint8:
+        image_array = (image_array * 255).astype(np.uint8)
     
-    processed_input_image, floorplan_output_image = generate_floorplan(input_image)
+    # Convert to PIL Image
+    image = Image.fromarray(image_array)
     
-    return processed_input_image, floorplan_output_image, "Processing complete."
+    # Convert to base64
+    buffered = BytesIO()
+    image.save(buffered, format="JPEG")
+    return base64.b64encode(buffered.getvalue()).decode()
 
-# Define the Gradio interface
-inputs = gr.Image(type="numpy", label="Upload Floorplan Image")
-outputs = [
-    gr.Image(type="numpy", label="Processed Input Image"),
-    gr.Image(type="numpy", label="Generated Floorplan"),
-    gr.Textbox(label="Status")
-]
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-title = "DeepFloorplan: Automatic Floorplan Generation"
-description = "Upload an image of a floorplan sketch to generate a structured floorplan."
-
-# Launch the Gradio app
-iface = gr.Interface(
-    fn=floorplan_interface,
-    inputs=inputs,
-    outputs=outputs,
-    title=title,
-    description=description,
-    live=False # Set to True for live updates as user changes input, False for a submit button.
-)
+@app.route('/process', methods=['POST'])
+def process():
+    if 'image' not in request.files:
+        return render_template('index.html', status='No image uploaded', error=True)
+    
+    file = request.files['image']
+    if file.filename == '':
+        return render_template('index.html', status='No image selected', error=True)
+    
+    try:
+        # Read and convert the uploaded image to numpy array
+        image = Image.open(file)
+        image_np = np.array(image)
+        
+        # Generate floorplan
+        original_image, floorplan_image = generate_floorplan(image_np)
+        
+        # Convert images to base64 for display
+        original_b64 = numpy_to_base64(original_image)
+        floorplan_b64 = numpy_to_base64(floorplan_image)
+        
+        return render_template('index.html',
+                             original_image=original_b64,
+                             floorplan_image=floorplan_b64,
+                             status='Processing complete!')
+    
+    except Exception as e:
+        return render_template('index.html',
+                             status=f'Error processing image: {str(e)}',
+                             error=True)
 
 if __name__ == '__main__':
-    iface.launch() 
+    app.run(debug=True) 

@@ -1,0 +1,38 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# UV Pip-Compatible Commands
+
+## Package Installation
+Install packages using pip-compatible commands:
+```bash
+uv pip install {package}          # Install latest version
+uv pip install "{package}<1.0.0"  # Install with version constraint
+uv pip install --upgrade {package} # Upgrade existing package
+```
+
+## Package Removal
+Remove installed packages:
+```bash
+uv pip uninstall {package}        # Remove a package
+```
+
+## Environment Synchronization
+Sync environment from requirements:
+```bash
+uv pip sync requirements.txt      # Sync from requirements file
+```
+
+## Requirements Management
+Generate requirements files:
+```bash
+uv pip compile pyproject.toml -o requirements.txt  # Generate requirements.txt
+```
+
+## VCS Installation
+Install from version control:
+```bash
+uv pip install "package @ git+https://github.com/user/repo.git"  # Install from Git
+```
